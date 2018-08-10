@@ -2,6 +2,7 @@ module Main where
   import Control.Monad.State
   import Control.Concurrent.Thread.Delay
   import System.IO
+  import System.Environment (getArgs)
   import System.Console.ANSI
   import qualified Data.Map as M
 
@@ -18,14 +19,8 @@ module Main where
   setCursorPos = flip setCursorPosition
 
   -- create initial grid
-  createGrid :: Int -> Int -> Grid
-  createGrid w h = M.fromList $ [((x, y), Dead) | x <- [1..w], y <- [1..h]]
-
-  -- insert living cells into grid.
-  -- TODO:
-  -- Make this easier to add cells to
-  insertCells :: Grid -> Grid
-  insertCells g = M.insert (3, 3) Alive (M.insert (2, 3) Alive (M.insert (4, 3) Alive g))
+  createGrid :: Int -> Int -> [(Int, Int)]
+  createGrid w h = [(x, y) | x <- [1..w], y <- [1..h]]
 
   -- draw the grid
   drawGrid :: Grid -> IO ()
@@ -57,25 +52,35 @@ module Main where
 
   -- main control flow of program is done with the State Monad Transformer
   -- to clean up the code and allow IO drawing actions
-  simulate :: StateT Grid IO ()
+  simulate :: StateT (Grid, Int) IO ()
   simulate = do
-    g <- get
+    (g, gen) <- get
     let g' = M.fromList $ map (updateCell g) (M.toList g)
     liftIO $ drawGrid g'
-    put g'
+    liftIO $ do
+      setCursorPos 20 3
+      putStrLn $ "Generation: " ++ show gen
+    put (g', gen + 1)
     liftIO $ delay 1000000 -- wait one second
-    simulate
+    case (filter (\((x, y), c) -> c == Alive) (M.toList g')) of
+      [] -> return ()
+      (x:xs) -> simulate
 
   main :: IO ()
   main = do
+    args <- getArgs
+    gridFile <- map words <$> lines <$> readFile (head args)
+    let cellList = map (\c -> if c == 'x' then Dead else Alive) ((concat . concat) gridFile)
     hSetEcho stdin False
     hSetBuffering stdin NoBuffering
     hSetBuffering stdout NoBuffering
     hideCursor
     setTitle "Conways Game Of Life"
     clearScreen
-    let startingGrid = insertCells (createGrid 5 5)
+    let startingGrid = M.fromList $ zip (createGrid (length (head gridFile)) (length gridFile)) cellList
     drawGrid startingGrid
-    runStateT simulate startingGrid
+    _ <- getChar
+    runStateT simulate (startingGrid, 1)
     showCursor
     setSGR [Reset]
+    putStrLn "No more living cells!"
